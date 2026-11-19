@@ -17,7 +17,7 @@
 
 | 平台 | 資料來源 |
 | --- | --- |
-| Gemini | 用獨立的 Chrome 設定檔（`%LOCALAPPDATA%\ai-usage-tray\gemini-profile`）登入一次 Google，之後以無頭 Chrome 讀取 `gemini.google.com/usage` 頁面文字並解析。 |
+| Gemini | 用獨立的 Chrome 設定檔（`%LOCALAPPDATA%\ai-usage-tray\gemini-profile`）登入一次 Google，之後以無頭模式啟動你已安裝的 Chrome，透過本機 DevTools 介面（只連 127.0.0.1）讀取 `gemini.google.com/usage` 頁面文字並解析。 |
 | Codex | 讀本機 Codex 的登入檔 `%USERPROFILE%\.codex\auth.json`（只讀、不刷新不改寫），查詢 `chatgpt.com/backend-api/wham/usage`。 |
 | Claude | 不在本專案內，請另外安裝 usage-monitor-for-claude。 |
 

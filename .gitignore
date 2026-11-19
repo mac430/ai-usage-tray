@@ -7,3 +7,4 @@ dist/
 *.zip
 .venv/
 venv/
+.build-venv/

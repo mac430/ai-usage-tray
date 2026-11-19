@@ -4,7 +4,7 @@
 
 | 套件 | 授權 | 網址 |
 | --- | --- | --- |
-| Playwright for Python（含 Node.js driver） | Apache-2.0 | https://github.com/microsoft/playwright-python |
+| websocket-client | Apache-2.0 | https://github.com/websocket-client/websocket-client |
 | pystray | LGPL-3.0 | https://github.com/moses-palmer/pystray |
 | Pillow | MIT-CMU (HPND) | https://github.com/python-pillow/Pillow |
 | Python / tkinter（Tcl/Tk） | PSF License / Tcl license | https://www.python.org/ |

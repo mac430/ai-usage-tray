@@ -27,8 +27,7 @@ _CHROME_CANDIDATES = [
 ]
 
 # 頁面出現「已使用 N%」或「N% used」就代表資料載入完成。
-# 注意：Gemini 頁面啟用 Trusted Types，不能用 page.wait_for_function 傳字串（會被擋），
-# 所以改成在 Python 端輪詢頁面文字。
+# 在 Python 端每秒輪詢頁面文字（Gemini 頁面啟用 Trusted Types，不在頁面內注入等待腳本）。
 _DATA_READY_RE = re.compile(r"(已使用|used)\s*\d+\s*%|\d+\s*%\s*used", re.I)
 POLL_INTERVAL_MS = 1000
 
@@ -70,39 +69,19 @@ def fetch() -> ProviderStatus:
     if not GEMINI_PROFILE_DIR.is_dir():
         return ProviderStatus(PROVIDER, "login_required", "尚未登入，請先執行 login", fetched_at=now)
     try:
-        from playwright.sync_api import sync_playwright
+        from .cdp import CdpError, read_page_text
+        text, final_url = read_page_text(
+            find_chrome(), GEMINI_PROFILE_DIR, USAGE_URL,
+            ready=lambda t: bool(_DATA_READY_RE.search(t)),
+            wait_seconds=WAIT_FOR_DATA_MS / 1000, startup_timeout=PAGE_TIMEOUT_MS / 1000,
+        )
+    except FileNotFoundError:
+        return ProviderStatus(PROVIDER, "error", "找不到 Chrome，請先安裝 Google Chrome", fetched_at=now)
     except ImportError:
-        return ProviderStatus(PROVIDER, "error",
-                              "缺少 playwright 套件（python -m pip install playwright）", fetched_at=now)
-
-    try:
-        with sync_playwright() as p:
-            ctx = p.chromium.launch_persistent_context(
-                str(GEMINI_PROFILE_DIR),
-                channel="chrome",
-                headless=True,
-                ignore_default_args=["--enable-automation"],
-                args=["--disable-blink-features=AutomationControlled"],
-                viewport={"width": 900, "height": 1000},
-            )
-            try:
-                page = ctx.pages[0] if ctx.pages else ctx.new_page()
-                page.goto(USAGE_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
-                text = ""
-                waited = 0
-                while True:
-                    text = page.inner_text("body")
-                    if _DATA_READY_RE.search(text) or waited >= WAIT_FOR_DATA_MS:
-                        break  # 逾時就交給解析器判斷是登入畫面還是格式改了
-                    page.wait_for_timeout(POLL_INTERVAL_MS)
-                    waited += POLL_INTERVAL_MS
-                final_url = page.url
-            finally:
-                ctx.close()
-    except Exception as e:  # 瀏覽器啟動失敗、設定檔被鎖定等
-        msg = str(e).splitlines()[0][:200] if str(e) else type(e).__name__
-        if "user data directory is already in use" in str(e).lower() or "profile" in str(e).lower():
-            msg = "專用設定檔正被另一個 Chrome 視窗使用，請先關閉它。 (" + msg + ")"
-        return ProviderStatus(PROVIDER, "error", msg, fetched_at=now)
+        return ProviderStatus(PROVIDER, "error", "缺少 websocket-client 套件", fetched_at=now)
+    except CdpError as e:
+        return ProviderStatus(PROVIDER, "error", str(e)[:200], fetched_at=now)
+    except Exception as e:  # noqa: BLE001
+        return ProviderStatus(PROVIDER, "error", f"{type(e).__name__}: {str(e)[:150]}", fetched_at=now)
 
     return parse_usage_text(text, _now(), final_url)
