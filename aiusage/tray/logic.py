@@ -57,7 +57,7 @@ def tooltip(name: str, st: ProviderStatus, stale: bool = False, show_used: bool 
         parts.append(f"{w.label} {fmt_pct(w, show_used)}（{fmt_reset(w)} 重設）")
     if stale:
         parts.append("資料可能過期")
-    return "｜".join(parts)[:127]
+    return "\n".join(parts)[:127]
 
 
 def _status_text(st: ProviderStatus) -> str:
