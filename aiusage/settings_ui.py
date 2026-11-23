@@ -16,6 +16,7 @@ from tkinter import messagebox, ttk
 from . import __version__
 from . import settings as cfg
 from . import setup_checks as sc
+from . import updater
 from .paths import BASE_DIR, GEMINI_PROFILE_DIR
 from .tray import winutil
 
@@ -60,6 +61,8 @@ class SettingsWindow(tk.Tk):
             f = ttk.Frame(nb)
             build(f)
             nb.add(f, text=f"  {title}  ")
+        if not self.first_run and updater.available_version():
+            nb.select(3)                     # 有新版本：直接停在「一般」分頁的更新區
         bottom = ttk.Frame(self)
         bottom.pack(fill="x", **PAD)
         ttk.Label(bottom, text="設定會自動儲存", foreground="#666").pack(side="left")
@@ -161,7 +164,24 @@ class SettingsWindow(tk.Tk):
         ttk.Button(row, text="建立桌面捷徑", command=self._make_shortcut).pack(side="left")
         ttk.Button(row, text="開啟記錄資料夾", command=self._open_logs).pack(side="left", padx=8)
 
-        ttk.Label(f, foreground="#666", text=f"AI 用量 v{__version__}　·　github.com/mac430/ai-usage-tray").pack(anchor="w", **PAD)
+        box = ttk.LabelFrame(f, text=f" 版本（目前 v{__version__}） ")
+        box.pack(fill="x", **PAD)
+        self.var_autoupd = tk.BooleanVar(value=self.s["auto_update_check"])
+        self.var_autoupd.trace_add("write", lambda *_a: self._save(auto_update_check=self.var_autoupd.get()))
+        ttk.Checkbutton(box, text="每天自動檢查有沒有新版本（有的話通知一次）",
+                        variable=self.var_autoupd).pack(anchor="w", padx=10, pady=3)
+        row = ttk.Frame(box); row.pack(fill="x", padx=10, pady=3)
+        self.btn_check_upd = ttk.Button(row, text="檢查更新", command=self.check_update)
+        self.btn_check_upd.pack(side="left")
+        self.btn_install = ttk.Button(row, text="下載並安裝", command=self.install_update)
+        self.btn_release = ttk.Button(row, text="看更新內容", command=self._open_release)
+        self.update_var = tk.StringVar(value="")
+        ttk.Label(box, textvariable=self.update_var, wraplength=WRAP, justify="left").pack(anchor="w", padx=10, pady=(0, 8))
+        self._release = None
+        newer = updater.available_version()
+        if newer:
+            self.update_var.set(f"★ 有新版本 v{newer}，按「檢查更新」取得下載資訊。")
+        ttk.Label(f, foreground="#666", text="github.com/mac430/ai-usage-tray").pack(anchor="w", **PAD)
 
     # ── 存設定 ─────────────────────────────────────────────
     def _save(self, **changes) -> None:
@@ -197,6 +217,60 @@ class SettingsWindow(tk.Tk):
         BASE_DIR.mkdir(parents=True, exist_ok=True)
         if winutil.is_windows():
             os.startfile(str(BASE_DIR))  # type: ignore[attr-defined]
+
+    # ── 更新 ───────────────────────────────────────────────
+    def check_update(self) -> None:
+        self.btn_check_upd.state(["disabled"])
+        self.update_var.set("● 檢查中…")
+
+        def done(res) -> None:
+            def ui():
+                self.btn_check_upd.state(["!disabled"])
+                if isinstance(res, Exception):
+                    self.update_var.set(f"✖ 檢查失敗（{type(res).__name__}），可能沒有網路，稍後再試。")
+                    return
+                self._release = res
+                if updater.is_newer(res.version):
+                    how = "按「下載並安裝」自動更新。" if updater.can_self_update() else "請到 GitHub 下載。"
+                    self.update_var.set(f"★ 有新版本 v{res.version}（目前 v{__version__}）。{how}")
+                    if updater.can_self_update():
+                        self.btn_install.pack(side="left", padx=8)
+                    self.btn_release.pack(side="left")
+                else:
+                    self.update_var.set(f"✔ 已經是最新版（v{__version__}）。")
+            self._ui(ui)
+
+        sc.run_in_thread(updater.check_now, done)
+
+    def install_update(self) -> None:
+        rel = self._release
+        if rel is None or not updater.is_newer(rel.version):
+            return
+        if not messagebox.askyesno(WINDOW_TITLE, f"要更新到 v{rel.version} 嗎？\n"
+                                   "圖示會暫時消失，幾秒後自動重新開啟；設定和登入資料都會保留。"):
+            return
+        self.btn_install.state(["disabled"])
+        self.btn_check_upd.state(["disabled"])
+
+        def work():
+            updater.prepare_and_install(rel, lambda m: self._ui(lambda: self.update_var.set("● " + m)))
+            return True
+
+        def done(res) -> None:
+            def ui():
+                if isinstance(res, Exception):
+                    self.update_var.set(f"✖ 更新失敗：{res}")
+                    self.btn_install.state(["!disabled"])
+                    self.btn_check_upd.state(["!disabled"])
+                    return
+                cfg.request("quit")             # 請所有圖示結束，外部小程式換好檔後會重新啟動
+                self.after(800, self.destroy)
+            self._ui(ui)
+
+        sc.run_in_thread(work, done)
+
+    def _open_release(self) -> None:
+        updater.open_release_page(self._release.page_url if self._release else updater.RELEASES_PAGE)
 
     # ── 背景工作 → 主執行緒 ────────────────────────────────
     def _pump(self) -> None:

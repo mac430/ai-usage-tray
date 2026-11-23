@@ -25,6 +25,7 @@ DEFAULTS: dict = {
     "alert_warn": 20,         # 剩餘 ≤ 這個 % 時通知
     "alert_crit": 5,          # 剩餘 ≤ 這個 % 時再通知一次
     "interval_minutes": 10,
+    "auto_update_check": True,   # 每天檢查一次有沒有新版本
 }
 
 
@@ -47,7 +48,7 @@ def _clamp_int(v, lo: int, hi: int, default: int) -> int:
 def normalize(raw: dict) -> dict:
     """補上預設值並修正不合法的值（手動改壞檔案也不會讓程式掛掉）。"""
     s = dict(DEFAULTS)
-    for k in ("show_gemini", "show_codex", "show_used", "notify"):
+    for k in ("show_gemini", "show_codex", "show_used", "notify", "auto_update_check"):
         if isinstance(raw.get(k), bool):
             s[k] = raw[k]
     s["alert_warn"] = _clamp_int(raw.get("alert_warn"), 1, 99, DEFAULTS["alert_warn"])

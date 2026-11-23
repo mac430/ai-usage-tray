@@ -17,6 +17,7 @@ from typing import Callable, Optional
 
 from ..model import ProviderStatus
 from ..paths import BASE_DIR
+from .. import instances, updater
 from .. import settings as cfg
 from .. import setup_checks
 from . import winutil
@@ -26,6 +27,8 @@ from .render import render_icon
 log = logging.getLogger("aiusage.tray")
 
 WATCH_SECONDS = 2
+UPDATE_CHECK_DELAY = 60          # 啟動 1 分鐘後才第一次檢查更新，之後每小時看一次是否滿一天
+UPDATE_POLL_SECONDS = 3600
 
 
 def _setup_logging(key: str) -> None:
@@ -69,7 +72,11 @@ class TrayApp:
     def _watch_loop(self) -> None:
         """設定檔變了就重新讀；有人請求更新／結束就照做。"""
         last_refresh = cfg.request_time("refresh")
+        next_update_check = time.time() + UPDATE_CHECK_DELAY
         while not self._stop.wait(WATCH_SECONDS):
+            if time.time() >= next_update_check:
+                next_update_check = time.time() + UPDATE_POLL_SECONDS
+                self._maybe_check_update()
             try:
                 m = cfg.mtime(cfg.settings_path())
                 if m != self._settings_mtime:
@@ -95,6 +102,20 @@ class TrayApp:
                     self.on_refresh_self()
             except Exception:
                 log.exception("watch loop error")
+
+    def _maybe_check_update(self) -> None:
+        """每天一次：有新版本就通知一次（同一版本只通知一次），並在右鍵選單顯示。"""
+        if not self.settings.get("auto_update_check", True) or not updater.due():
+            return
+        try:
+            rel = updater.check_now()
+        except Exception as e:  # noqa: BLE001
+            log.info("update check failed: %s", e)
+            return
+        if updater.is_newer(rel.version) and updater.load_state().get("notified") != rel.version:
+            updater.save_state(notified=rel.version)
+            self._notify("AI 用量有新版本", f"v{rel.version} 已推出，右鍵圖示選「有新版本」即可更新")
+        self._render()
 
     # ── 畫面更新 ────────────────────────────────────────────
     def _render(self) -> None:
@@ -201,6 +222,9 @@ class TrayApp:
             for ln in lines:
                 yield Item(ln, None, enabled=False)
             yield pystray.Menu.SEPARATOR
+            newer = updater.available_version()
+            if newer and self._open_settings is not None:
+                yield Item(f"★ 有新版本 v{newer}（點這裡更新）", self.on_settings)
             yield Item("立即更新", self.on_refresh_all, default=True)
             yield Item("設定…", self.on_settings, visible=self._open_settings is not None)
             yield Item("結束（關閉所有用量圖示）", self.on_quit_all)
@@ -213,6 +237,7 @@ class TrayApp:
             print(f"{self.name} 已經在執行了。")
             return 0
         _setup_logging(self.key)
+        instances.register(self.key)
         import pystray
 
         self._icon = pystray.Icon(

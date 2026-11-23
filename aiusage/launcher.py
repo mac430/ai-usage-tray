@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 
+from . import instances
 from . import settings as cfg
 from .setup_checks import gemini_profile_exists
 from .tray import winutil
@@ -29,6 +31,12 @@ def start_enabled_icons(s: dict | None = None) -> list[str]:
     return keys
 
 
+def stop_old_versions() -> None:
+    """先結束別的版本（舊位置或舊版本）的圖示，免得它們佔著單一實例鎖、新版圖示出不來。"""
+    if instances.stop_other_versions():
+        time.sleep(1)
+
+
 def is_first_run() -> bool:
     """從來沒用過：沒有設定檔，也沒有 Gemini 專用設定檔。"""
     return not cfg.exists() and not gemini_profile_exists()
@@ -41,6 +49,7 @@ def open_settings_window(first_run: bool = False) -> int:
 
 def launch_all() -> int:
     """開機自動啟動：啟動勾選的圖示（沒登入的會自動隱藏）；第一次使用另外打開設定頁。"""
+    stop_old_versions()
     first = is_first_run()
     if not first and not cfg.exists():   # 舊版升級上來：建立設定檔，桌面捷徑改成開設定頁
         cfg.save(cfg.load())
@@ -52,6 +61,7 @@ def launch_all() -> int:
 
 def launch_settings() -> int:
     """桌面捷徑：啟動勾選的圖示，並打開設定頁。"""
+    stop_old_versions()
     first = is_first_run()
     start_enabled_icons()
     return open_settings_window(first_run=first)
