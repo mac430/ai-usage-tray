@@ -8,10 +8,11 @@
 ## 功能
 
 - 圖示：大數字＝目前用量（預設顯示「已使用 %」，可切換成「剩餘 %」）；上條＝短時窗、下條＝每週（Codex Go 方案只有每月一條）。顏色依剩餘量綠／黃／紅。
-- 滑鼠移上去看詳細與重設時間；右鍵選單：立即更新、重新登入、顯示模式、開機自動啟動、結束。
-- 每 10 分鐘讀一次，失敗自動退避（最長 30 分鐘）；暫時讀不到時沿用最近 2 小時內的資料並標示為過期。
-- 已用 80%、95% 時各發一次 Windows 通知；額度重設後重新計算。
-- 設定精靈：第一次執行自動開啟，引導登入 Gemini、檢查 Codex／Claude 登入、建立捷徑與開機啟動。
+- 滑鼠移上去看詳細與重設時間；右鍵選單：立即更新（全部）、設定…、結束。
+- 每個圖示是各自的 exe，可以分別拖到工作列或收進 ^ 裡；沒登入的平台自動隱藏。
+- 預設每 10 分鐘讀一次（可選 5／10／15／30），失敗自動退避（最長 30 分鐘）；暫時讀不到時沿用最近 2 小時內的資料並標示為過期。
+- 剩餘 20%、5% 時各發一次 Windows 通知（門檻可調、可關閉）；額度重設後重新計算。
+- 設定頁（桌面「AI 用量」捷徑或右鍵「設定…」）：帳號登入／登出、要顯示哪些圖示、已使用或剩餘、通知、更新頻率、開機啟動。第一次執行自動開啟。
 
 ## 運作方式
 
@@ -42,13 +43,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 ```
 
 會產生 `dist\AIUsageTray\`（資料夾版 exe），安裝到 `%LOCALAPPDATA%\Programs\AIUsageTray-exe`，並在桌面輸出 `AIUsageTray-win.zip`。
-其他電腦解壓到固定位置後雙擊 `AIUsageTray.exe` 即可，不需要 Python；第一次會自動開設定精靈。
+其他電腦解壓到固定位置後雙擊 `AIUsageTray.exe` 即可，不需要 Python；第一次會自動開設定頁。
 
 ### 從原始碼執行
 
 ```powershell
 python -m pip install -r requirements.txt
-python -m aiusage wizard          # 設定精靈
+python -m aiusage settings        # 設定頁（登入、顯示、通知、更新頻率）
 python -m aiusage tray all        # 啟動全部圖示
 ```
 

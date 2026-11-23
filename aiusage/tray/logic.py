@@ -84,6 +84,7 @@ def menu_lines(st: ProviderStatus, now: Optional[datetime] = None, show_used: bo
 class AlertTracker:
     """剩餘額度跌破門檻時各通知一次；額度重設（剩餘明顯回升）後重新武裝。"""
     name: str
+    thresholds: tuple[float, ...] = ALERT_THRESHOLDS
     _fired: dict[str, set[float]] = field(default_factory=dict)
     _last_remaining: dict[str, float] = field(default_factory=dict)
 
@@ -96,20 +97,25 @@ class AlertTracker:
             fired = self._fired.setdefault(w.key, set())
             last = self._last_remaining.get(w.key)
             if last is None:   # 第一次看到：已低於門檻的視為「已通知過」，避免啟動就跳通知
-                fired.update(th for th in ALERT_THRESHOLDS if rem <= th)
+                fired.update(th for th in self.thresholds if rem <= th)
                 self._last_remaining[w.key] = rem
                 continue
             if last is not None and rem > last + 10:       # 視為額度已重設
-                if last <= max(ALERT_THRESHOLDS) and rem >= 50:
+                if last <= max(self.thresholds) and rem >= 50:
                     events.append((f"{self.name} 額度已重設", f"{w.label}剩餘 {rem:g}%"))
                 fired.clear()
-            newly = [th for th in ALERT_THRESHOLDS if rem <= th and th not in fired]
+            newly = [th for th in self.thresholds if rem <= th and th not in fired]
             if newly:
                 fired.update(newly)   # 同時跨過多個門檻，只發一則通知
                 events.append((f"{self.name} 額度剩 {rem:g}%",
                                f"{w.label}已用 {w.used_percent:g}%，{fmt_reset(w)} 重設"))
             self._last_remaining[w.key] = rem
         return events
+
+
+def should_hide(current: Optional[ProviderStatus]) -> bool:
+    """沒登入（或登入失效）時整個圖示隱藏，到設定頁登入後會自動出現。"""
+    return current is not None and current.status == "login_required"
 
 
 def pick_display(current: ProviderStatus, last_ok: Optional[ProviderStatus],

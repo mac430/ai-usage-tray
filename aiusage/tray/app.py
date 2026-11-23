@@ -1,13 +1,14 @@
 """托盤程式：一個平台一個圖示、一個程序。
 
 結構：
-  poll 執行緒  ──fetch()──▶  更新狀態  ──▶  重畫圖示／提示／選單／通知
-右鍵選單：資訊列（不可點）、立即更新、重新登入、開機自動啟動、結束。
-左鍵（預設動作）：立即更新。
+  poll 執行緒   ──fetch()──▶  更新狀態  ──▶  重畫圖示／提示／選單／通知
+  watch 執行緒  每 2 秒看設定檔與請求檔，有變就套用（設定頁改了馬上生效）
+沒登入時圖示整個隱藏；在設定頁登入成功後會請所有圖示立即更新，圖示就會出現。
+右鍵選單：資訊列（不可點）、立即更新（全部）、設定…、結束（全部圖示）。
+左鍵（預設動作）：立即更新（全部）。
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
@@ -16,14 +17,15 @@ from typing import Callable, Optional
 
 from ..model import ProviderStatus
 from ..paths import BASE_DIR
+from .. import settings as cfg
 from .. import setup_checks
 from . import winutil
-from .logic import AlertTracker, menu_lines, next_interval, pick_display, tooltip
+from .logic import AlertTracker, menu_lines, next_interval, pick_display, should_hide, tooltip
 from .render import render_icon
 
 log = logging.getLogger("aiusage.tray")
 
-DEFAULT_INTERVAL_SECONDS = 10 * 60
+WATCH_SECONDS = 2
 
 
 def _setup_logging(key: str) -> None:
@@ -38,46 +40,68 @@ class TrayApp:
     def __init__(
         self, key: str, name: str,
         fetch: Callable[[], ProviderStatus],
-        launch_login: Optional[Callable[[], object]] = None,
-        interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
+        open_settings: Optional[Callable[[], object]] = None,
     ) -> None:
         self.key, self.name = key, name
         self._fetch = fetch
-        self._launch_login = launch_login
-        self.base_interval = interval_seconds
-        self._interval = interval_seconds
+        self._open_settings = open_settings
 
         self._lock = threading.Lock()
+        self._render_lock = threading.Lock()   # poll 與 watch 兩個執行緒都會重畫
         self._current: Optional[ProviderStatus] = None
         self._last_ok: Optional[ProviderStatus] = None
-        self._alerts = AlertTracker(name)
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self._login_running = False
         self._icon = None  # pystray.Icon
-        self._settings_path = BASE_DIR / f"settings-{key}.json"
-        self.show_used = self._load_setting("show_used", True)
+        self._started = time.time()
+        self._settings_mtime = cfg.mtime(cfg.settings_path())
+        self._apply_settings(cfg.load())
+        self._interval = self.base_interval
+        self._alerts = AlertTracker(name, cfg.thresholds(self.settings))
 
-    def _load_setting(self, name, default):
-        try:
-            return json.loads(self._settings_path.read_text(encoding="utf-8")).get(name, default)
-        except Exception:
-            return default
+    # ── 設定 ────────────────────────────────────────────────
+    def _apply_settings(self, s: dict) -> None:
+        self.settings = s
+        self.show_used = s["show_used"]
+        self.notify_on = s["notify"]
+        self.base_interval = s["interval_minutes"] * 60
 
-    def _save_setting(self, name, value) -> None:
-        try:
+    def _watch_loop(self) -> None:
+        """設定檔變了就重新讀；有人請求更新／結束就照做。"""
+        last_refresh = cfg.request_time("refresh")
+        while not self._stop.wait(WATCH_SECONDS):
             try:
-                data = json.loads(self._settings_path.read_text(encoding="utf-8"))
+                m = cfg.mtime(cfg.settings_path())
+                if m != self._settings_mtime:
+                    self._settings_mtime = m
+                    s = cfg.load()
+                    if not cfg.enabled(s, self.key):
+                        log.info("disabled in settings, quitting")
+                        self.on_quit_self()
+                        return
+                    old_interval, old_th = self.base_interval, cfg.thresholds(self.settings)
+                    self._apply_settings(s)
+                    if cfg.thresholds(s) != old_th:
+                        self._alerts = AlertTracker(self.name, cfg.thresholds(s))
+                    if self.base_interval != old_interval:
+                        self.on_refresh_self()
+                    self._render()
+                if cfg.request_time("quit") > self._started:
+                    self.on_quit_self()
+                    return
+                r = cfg.request_time("refresh")
+                if r != last_refresh:
+                    last_refresh = r
+                    self.on_refresh_self()
             except Exception:
-                data = {}
-            data[name] = value
-            BASE_DIR.mkdir(parents=True, exist_ok=True)
-            self._settings_path.write_text(json.dumps(data), encoding="utf-8")
-        except Exception:
-            log.exception("save setting failed")
+                log.exception("watch loop error")
 
     # ── 畫面更新 ────────────────────────────────────────────
     def _render(self) -> None:
+        with self._render_lock:
+            self._render_unlocked()
+
+    def _render_unlocked(self) -> None:
         if self._icon is None:
             return
         now = datetime.now().astimezone()
@@ -101,6 +125,9 @@ class TrayApp:
         self._icon.icon = img
         self._icon.title = title
         self._icon.update_menu()
+        visible = not should_hide(cur)
+        if self._icon.visible != visible:
+            self._icon.visible = visible
 
     # ── 輪詢 ────────────────────────────────────────────────
     def _poll_once(self) -> None:
@@ -116,11 +143,12 @@ class TrayApp:
         self._interval = next_interval(st.status, self.base_interval, self._interval)
         self._render()
         for title, msg in self._alerts.update(st):
-            self._notify(title, msg)
+            if self.notify_on:
+                self._notify(title, msg)
 
     def _poll_loop(self) -> None:
         while not self._stop.is_set():
-            if not self._login_running and not setup_checks.is_paused(self.key):
+            if not setup_checks.is_paused(self.key):
                 try:
                     self._poll_once()
                 except Exception:
@@ -136,39 +164,30 @@ class TrayApp:
             log.exception("notify failed")
 
     # ── 選單動作 ────────────────────────────────────────────
-    def on_refresh(self, icon=None, item=None) -> None:
+    def on_refresh_self(self) -> None:
         self._interval = self.base_interval
         self._wake.set()
 
-    def on_login(self, icon=None, item=None) -> None:
-        if self._launch_login is None or self._login_running:
-            return
-        threading.Thread(target=self._login_flow, daemon=True).start()
+    def on_refresh_all(self, icon=None, item=None) -> None:
+        self.on_refresh_self()
+        cfg.request("refresh")      # 其他圖示（包括目前隱藏的）也一起更新
 
-    def _login_flow(self) -> None:
-        self._login_running = True
-        try:
-            proc = self._launch_login()
-            proc.wait()  # 等使用者關閉登入視窗
-        except Exception:
-            log.exception("login failed")
-        finally:
-            self._login_running = False
-            self.on_refresh()
+    def on_settings(self, icon=None, item=None) -> None:
+        if self._open_settings is not None:
+            try:
+                self._open_settings()
+            except Exception:
+                log.exception("open settings failed")
 
-    def on_toggle_used(self, icon=None, item=None) -> None:
-        self.show_used = not self.show_used
-        self._save_setting("show_used", self.show_used)
-        self._render()
-
-    def on_toggle_autostart(self, icon=None, item=None) -> None:
-        winutil.set_autostart("all", not winutil.autostart_enabled("all"))
-
-    def on_quit(self, icon=None, item=None) -> None:
+    def on_quit_self(self) -> None:
         self._stop.set()
         self._wake.set()
         if self._icon is not None:
             self._icon.stop()
+
+    def on_quit_all(self, icon=None, item=None) -> None:
+        cfg.request("quit")
+        self.on_quit_self()
 
     # ── 選單 ────────────────────────────────────────────────
     def _build_menu(self):
@@ -182,15 +201,9 @@ class TrayApp:
             for ln in lines:
                 yield Item(ln, None, enabled=False)
             yield pystray.Menu.SEPARATOR
-            yield Item("立即更新", self.on_refresh, default=True)
-            if self._launch_login is not None:
-                yield Item("重新登入…", self.on_login)
-            yield Item("圖示顯示「已使用」（取消＝顯示剩餘）", self.on_toggle_used,
-                       checked=lambda item: self.show_used)
-            yield Item("開機自動啟動", self.on_toggle_autostart,
-                       checked=lambda item: winutil.autostart_enabled("all"),
-                       visible=winutil.is_windows())
-            yield Item("結束", self.on_quit)
+            yield Item("立即更新", self.on_refresh_all, default=True)
+            yield Item("設定…", self.on_settings, visible=self._open_settings is not None)
+            yield Item("結束（關閉所有用量圖示）", self.on_quit_all)
 
         return pystray.Menu(items)
 
@@ -211,6 +224,7 @@ class TrayApp:
         def setup(icon):
             icon.visible = True
             threading.Thread(target=self._poll_loop, daemon=True).start()
+            threading.Thread(target=self._watch_loop, daemon=True).start()
 
         log.info("start %s (interval=%ss)", self.key, self.base_interval)
         self._icon.run(setup)

@@ -1,2 +1,2 @@
-"""ai-usage-tray: 在托盤顯示 Claude / Gemini / Codex 剩餘用量（開發中）"""
-__version__ = "0.1.0"
+"""ai-usage-tray: 在托盤顯示 Gemini / Codex 用量（Claude 由 usage-monitor-for-claude 負責）"""
+__version__ = "0.3.0"

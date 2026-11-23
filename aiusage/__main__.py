@@ -3,7 +3,7 @@
   python -m aiusage gemini login            第一次：在專用設定檔登入 Google
   python -m aiusage gemini once             背景讀取一次，印出整理後的結果
   python -m aiusage gemini parse-file 檔案  離線解析一份已存的頁面文字（不連網）
-  python -m aiusage wizard                  開啟設定精靈（登入引導）
+  python -m aiusage settings                打開設定頁（並啟動勾選的圖示）；wizard 是舊名稱
   python -m aiusage tray all                啟動全部托盤圖示（Gemini、Codex）
   python -m aiusage tray gemini             啟動 Gemini 托盤圖示
   python -m aiusage codex once              讀取一次 Codex 用量（印出整理後的結果與原始回應）
@@ -30,18 +30,19 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[0] == "tray" and argv[1] == "all":
         from .launcher import launch_all
         return launch_all()
-    if len(argv) == 1 and argv[0] == "wizard":
-        from .wizard import main as wizard_main
-        return wizard_main()
+    if len(argv) == 1 and argv[0] in ("settings", "wizard"):
+        from .launcher import launch_settings
+        return launch_settings()
     if len(argv) == 2 and argv[0] == "tray" and argv[1] == "gemini":
         from .launcher import spawn
         from .providers.gemini import fetch
         from .tray.app import TrayApp
-        return TrayApp("gemini", "Gemini", fetch, lambda: spawn("wizard")).run()
+        return TrayApp("gemini", "Gemini", fetch, lambda: spawn("settings")).run()
     if len(argv) == 2 and argv[0] == "tray" and argv[1] == "codex":
+        from .launcher import spawn
         from .providers.codex import fetch
         from .tray.app import TrayApp
-        return TrayApp("codex", "Codex", fetch, None).run()
+        return TrayApp("codex", "Codex", fetch, lambda: spawn("settings")).run()
     if len(argv) == 2 and argv[0] == "codex" and argv[1] == "once":
         from .providers import codex
         st = codex.fetch()

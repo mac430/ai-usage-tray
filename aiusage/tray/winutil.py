@@ -44,7 +44,8 @@ def frozen() -> bool:
 def self_command(args: list[str]) -> list[str]:
     """重新執行「自己」的指令列：打包成 exe 時是 exe 本身，否則是 pythonw + run_tray.py。"""
     if frozen():
-        return [sys.executable] + args
+        main_exe = os.path.join(os.path.dirname(sys.executable), "AIUsageTray.exe")
+        return [main_exe if os.path.isfile(main_exe) else sys.executable] + args
     exe = sys.executable
     pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
     if os.path.isfile(pyw):
@@ -71,10 +72,28 @@ def autostart_command(key: str) -> str:
     return " ".join(f'"{p}"' if " " in p or p.endswith(".py") else p for p in self_command([key]))
 
 
+def _desktop_dir() -> str:
+    if is_windows():
+        try:
+            import ctypes
+            from ctypes import wintypes
+            buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetFolderPathW(None, 0x0010, None, 0, buf)   # CSIDL_DESKTOPDIRECTORY
+            if buf.value:
+                return buf.value
+        except Exception:  # noqa: BLE001
+            pass
+    return os.path.join(os.path.expanduser("~"), "Desktop")
+
+
+def desktop_shortcut_exists() -> bool:
+    return os.path.isfile(os.path.join(_desktop_dir(), "AI 用量.lnk"))
+
+
 def create_desktop_shortcut() -> None:
-    """用 PowerShell 在桌面建立「AI 用量」捷徑（指向自己的 all 啟動）。"""
+    """用 PowerShell 在桌面建立「AI 用量」捷徑（打開設定頁，並啟動勾選的圖示）。"""
     import subprocess
-    cmd = self_command(["all"])
+    cmd = self_command(["settings"])
     target, args = cmd[0], " ".join(f'"{a}"' for a in cmd[1:])
     ps = (
         "$ws=New-Object -ComObject WScript.Shell;"
