@@ -101,17 +101,20 @@ def desktop_shortcut_exists() -> bool:
 
 
 def create_desktop_shortcut() -> None:
-    """用 PowerShell 在桌面建立「AI 用量」捷徑（打開設定頁，並啟動勾選的圖示）。"""
+    """用 PowerShell 在桌面建立「AI 用量」捷徑（打開設定頁，並啟動勾選的圖示）。
+    路徑用環境變數傳給 PowerShell，不直接拼進指令：使用者名稱含 ' 之類的字元也不會壞。"""
     import subprocess
     cmd = self_command(["settings"])
-    target, args = cmd[0], " ".join(f'"{a}"' for a in cmd[1:])
-    ps = (
-        "$ws=New-Object -ComObject WScript.Shell;"
-        "$l=$ws.CreateShortcut([IO.Path]::Combine([Environment]::GetFolderPath('Desktop'),'AI 用量.lnk'));"
-        f"$l.TargetPath='{target}';$l.Arguments='{args}';"
-        f"$l.WorkingDirectory='{os.path.dirname(target)}';$l.Save()"
-    )
-    subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+    env = dict(os.environ,
+               AIU_TARGET=cmd[0],
+               AIU_ARGS=" ".join(f'"{a}"' for a in cmd[1:]),
+               AIU_WORKDIR=os.path.dirname(cmd[0]),
+               AIU_LNK=os.path.join(_desktop_dir(), "AI 用量.lnk"))
+    ps = ("$ws=New-Object -ComObject WScript.Shell;"
+          "$l=$ws.CreateShortcut($env:AIU_LNK);"
+          "$l.TargetPath=$env:AIU_TARGET;$l.Arguments=$env:AIU_ARGS;"
+          "$l.WorkingDirectory=$env:AIU_WORKDIR;$l.Save()")
+    subprocess.run(["powershell", "-NoProfile", "-Command", ps], env=env,
                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False)
 
 
