@@ -34,7 +34,12 @@
 
 ## 使用方式
 
-### 打包成 exe（建議）
+### 直接下載（最簡單）
+
+到 [Releases](https://github.com/mac430/ai-usage-tray/releases) 下載最新的 `AIUsageTray-win-vX.Y.Z.zip`，解壓到固定位置（例如 `%LOCALAPPDATA%\Programs\AIUsageTray`），雙擊 `AIUsageTray.exe`。不需要 Python。
+Release 由 GitHub Actions 在 Windows 上自動打包（見 `.github/workflows/build.yml`）。
+
+### 自己打包成 exe
 
 在有 Python 的電腦上執行一次：
 
