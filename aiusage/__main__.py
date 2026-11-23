@@ -4,7 +4,7 @@
   python -m aiusage gemini once             背景讀取一次，印出整理後的結果
   python -m aiusage gemini parse-file 檔案  離線解析一份已存的頁面文字（不連網）
   python -m aiusage settings                打開設定頁（並啟動勾選的圖示）；wizard 是舊名稱
-  python -m aiusage tray all                啟動全部托盤圖示（Gemini、Codex）
+  python -m aiusage tray all                只啟動勾選的托盤圖示（開機自動啟動用）
   python -m aiusage tray gemini             啟動 Gemini 托盤圖示
   python -m aiusage codex once              讀取一次 Codex 用量（印出整理後的結果與原始回應）
   python -m aiusage tray codex              啟動 Codex 托盤圖示

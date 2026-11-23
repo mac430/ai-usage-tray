@@ -1,6 +1,6 @@
 """啟動器：把各平台的托盤圖示各自開成獨立程序。
-  all       開機自動啟動用：啟動設定裡勾選的圖示；第一次使用改開設定頁
-  settings  桌面捷徑用：啟動勾選的圖示，並打開設定頁
+  launch_all()       開機自動啟動（autostart）：只啟動勾選的圖示；第一次使用才開設定頁
+  launch_settings()  直接雙擊 exe、桌面捷徑：啟動勾選的圖示，並打開設定頁
 每個圖示是獨立程序（有各自的單一實例鎖），重複執行不會多開；其中一個當掉也不影響其他。
 Claude 的圖示由原本的 usage-monitor-for-claude 負責，不在這裡啟動。
 """
@@ -50,11 +50,8 @@ def open_settings_window(first_run: bool = False) -> int:
 def launch_all() -> int:
     """開機自動啟動：啟動勾選的圖示（沒登入的會自動隱藏）；第一次使用另外打開設定頁。"""
     stop_old_versions()
+    winutil.refresh_autostart()
     first = is_first_run()
-    if not first and not cfg.exists():   # 舊版升級上來：建立設定檔，桌面捷徑改成開設定頁
-        cfg.save(cfg.load())
-        if winutil.is_windows() and winutil.desktop_shortcut_exists():
-            winutil.create_desktop_shortcut()
     start_enabled_icons()
     return open_settings_window(first_run=True) if first else 0
 
@@ -62,6 +59,7 @@ def launch_all() -> int:
 def launch_settings() -> int:
     """桌面捷徑：啟動勾選的圖示，並打開設定頁。"""
     stop_old_versions()
+    winutil.refresh_autostart()
     first = is_first_run()
     start_enabled_icons()
     return open_settings_window(first_run=first)

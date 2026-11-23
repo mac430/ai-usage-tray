@@ -1,8 +1,8 @@
 """入口（原始碼模式與打包成 exe 共用）：
-  run_tray.py            = all
-  run_tray.py all        啟動全部圖示（各開一個獨立程序後結束；第一次改開設定精靈）
-  run_tray.py settings              打開設定頁（桌面捷徑用）
-  run_tray.py gemini|codex          單獨執行一個圖示（內部使用 --single）
+  run_tray.py / run_tray.py all / run_tray.py settings
+                          打開設定頁，並啟動勾選的圖示（直接雙擊 exe、桌面捷徑、舊版捷徑都走這裡）
+  run_tray.py autostart   開機自動啟動用：只啟動圖示，不開視窗（第一次使用才開設定頁）
+  run_tray.py gemini|codex  單獨執行一個圖示（內部使用 --single）
 """
 import os
 import sys
@@ -17,5 +17,9 @@ if not getattr(sys, "frozen", False):
 from aiusage.__main__ import main  # noqa: E402
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--single"] or ["all"]
-    sys.exit(main(args if args[0] in ("settings", "wizard") else ["tray"] + args))
+    args = [a for a in sys.argv[1:] if a != "--single"] or ["settings"]
+    if args[0] in ("all", "settings", "wizard"):
+        sys.exit(main(["settings"]))
+    if args[0] == "autostart":
+        sys.exit(main(["tray", "all"]))
+    sys.exit(main(["tray"] + args))

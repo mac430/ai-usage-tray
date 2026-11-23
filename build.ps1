@@ -29,5 +29,5 @@ $size = (Get-ChildItem "dist\AIUsageTray" -Recurse | Measure-Object Length -Sum)
 Write-Host ("資料夾大小：{0:N1} MB，壓縮檔：{1:N1} MB" -f $size, ((Get-Item $zipOut).Length / 1MB))
 
 Write-Host "[6/6] 啟動圖示"
-Start-Process "$app\AIUsageTray.exe" -ArgumentList "all"
+Start-Process "$app\AIUsageTray.exe" -ArgumentList "autostart"
 Write-Host "完成。給筆電用的壓縮檔在桌面：$zipOut"

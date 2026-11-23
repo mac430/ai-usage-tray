@@ -178,7 +178,7 @@ do {
 if ($left) { $left | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1 }
 robocopy $Src $Dst /E /IS /IT /R:5 /W:1 /NFL /NDL /NJH /NP | Out-File $Log -Append -Encoding utf8
 "robocopy exit $LASTEXITCODE" | Out-File $Log -Append -Encoding utf8
-Start-Process (Join-Path $Dst 'AIUsageTray.exe') -ArgumentList 'all'
+Start-Process (Join-Path $Dst 'AIUsageTray.exe') -ArgumentList 'autostart'
 "done $(Get-Date)" | Out-File $Log -Append -Encoding utf8
 """
 

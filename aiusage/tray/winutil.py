@@ -69,7 +69,17 @@ def icon_command(key: str, args: list[str]) -> list[str]:
 
 
 def autostart_command(key: str) -> str:
-    return " ".join(f'"{p}"' if " " in p or p.endswith(".py") else p for p in self_command([key]))
+    # 開機用 autostart：只啟動圖示、不開視窗（all／直接雙擊會打開設定頁）
+    return " ".join(f'"{p}"' if " " in p or p.endswith(".py") else p for p in self_command(["autostart"]))
+
+
+def refresh_autostart() -> None:
+    """已開啟開機啟動的話，重寫一次指令（舊版寫的是 all，或程式換了位置）。"""
+    if autostart_enabled("all"):
+        try:
+            set_autostart("all", True)
+        except OSError:
+            pass
 
 
 def _desktop_dir() -> str:
