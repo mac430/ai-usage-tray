@@ -176,6 +176,7 @@ do {
   Start-Sleep -Milliseconds 500
 } while ((Get-Date) -lt $deadline)
 if ($left) { $left | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1 }
+Get-Process -Name 'AIUsageTray*' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 robocopy $Src $Dst /E /IS /IT /R:5 /W:1 /NFL /NDL /NJH /NP | Out-File $Log -Append -Encoding utf8
 "robocopy exit $LASTEXITCODE" | Out-File $Log -Append -Encoding utf8
 Start-Process (Join-Path $Dst 'AIUsageTray.exe') -ArgumentList 'autostart'
