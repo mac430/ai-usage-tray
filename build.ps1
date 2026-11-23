@@ -20,6 +20,9 @@ Write-Host "[3/6] 打包（需要幾分鐘）"
     --exclude-module numpy --exclude-module PIL.ImageQt --exclude-module PIL.ImageTk `
     run_tray.py
 if ($LASTEXITCODE -ne 0) { throw "打包失敗" }
+# 每個圖示一個專屬 exe（同一份程式的複本，共用 _internal），Windows 才會把兩個圖示分開記
+Copy-Item "dist\AIUsageTray\AIUsageTray.exe" "dist\AIUsageTray\AIUsageTray-Gemini.exe" -Force
+Copy-Item "dist\AIUsageTray\AIUsageTray.exe" "dist\AIUsageTray\AIUsageTray-Codex.exe" -Force
 Copy-Item LICENSE "dist\AIUsageTray\LICENSE.txt" -Force
 Copy-Item THIRD_PARTY_NOTICES.md "dist\AIUsageTray\THIRD_PARTY_NOTICES.md" -Force
 

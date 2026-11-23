@@ -53,6 +53,20 @@ def self_command(args: list[str]) -> list[str]:
     return [exe, os.path.join(root, "run_tray.py")] + args
 
 
+# 每個圖示用不同檔名的 exe 執行：Windows 依「執行檔路徑」記住托盤圖示的設定
+# （顯示在工作列或收進 ^ 裡），同一個 exe 開出的兩個圖示會被綁在一起。
+ICON_EXE = {"gemini": "AIUsageTray-Gemini.exe", "codex": "AIUsageTray-Codex.exe"}
+
+
+def icon_command(key: str, args: list[str]) -> list[str]:
+    """啟動某個圖示的指令列：打包版優先用該圖示專屬的 exe（找不到就退回主程式）。"""
+    if frozen() and key in ICON_EXE:
+        exe = os.path.join(os.path.dirname(sys.executable), ICON_EXE[key])
+        if os.path.isfile(exe):
+            return [exe] + args
+    return self_command(args)
+
+
 def autostart_command(key: str) -> str:
     return " ".join(f'"{p}"' if " " in p or p.endswith(".py") else p for p in self_command([key]))
 

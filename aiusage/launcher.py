@@ -19,7 +19,7 @@ def spawn(key: str) -> subprocess.Popen:
     flags = 0
     if sys.platform == "win32":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
-    return subprocess.Popen(winutil.self_command(["--single", key]), creationflags=flags, close_fds=True)
+    return subprocess.Popen(winutil.icon_command(key, ["--single", key]), creationflags=flags, close_fds=True)
 
 
 def launch(keys: list[str]) -> int:
