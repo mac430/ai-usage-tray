@@ -47,3 +47,31 @@ class T(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_cdp_retries_after_killing_orphans(monkeypatch, tmp_path):
+    from aiusage.providers import cdp
+    calls = []
+
+    def fake_once(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            raise cdp.ProfileBusy("busy")
+        return "text", "https://gemini.google.com/usage"
+    monkeypatch.setattr(cdp, "_read_once", fake_once)
+    monkeypatch.setattr(cdp, "kill_orphan_headless", lambda p: 1)
+    monkeypatch.setattr(cdp.time, "sleep", lambda s: None)
+    assert cdp.read_page_text(tmp_path / "c.exe", tmp_path, "u", ready=lambda t: True)[0] == "text"
+    assert len(calls) == 2
+
+
+def test_cdp_gives_up_when_nothing_to_kill(monkeypatch, tmp_path):
+    import pytest
+    from aiusage.providers import cdp
+
+    def busy(*a, **k):
+        raise cdp.ProfileBusy("busy")
+    monkeypatch.setattr(cdp, "_read_once", busy)
+    monkeypatch.setattr(cdp, "kill_orphan_headless", lambda p: 0)
+    with pytest.raises(cdp.ProfileBusy):
+        cdp.read_page_text(tmp_path / "c.exe", tmp_path, "u", ready=lambda t: True)

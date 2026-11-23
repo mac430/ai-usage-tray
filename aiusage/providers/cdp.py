@@ -28,12 +28,42 @@ def _http_json(port: int, path: str, timeout: float = 5) -> object:
         return json.loads(r.read().decode("utf-8"))
 
 
+class ProfileBusy(CdpError):
+    """專用設定檔正被另一個 Chrome 使用（Chrome 一啟動就把工作交給它然後自己結束）。"""
+
+
+_ORPHAN_PS = (
+    "$p=$env:AIU_PROFILE;"
+    "$n=0;"
+    "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+    "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($p) -and $_.CommandLine.Contains('--headless') } | "
+    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $n++ };"
+    "$n"
+)
+
+
+def kill_orphan_headless(profile: Path) -> int:
+    """結束還佔著這個設定檔的「背景（headless）」Chrome（例如圖示被強制關掉時留下的）。
+    只動帶 --headless 的，不會關到使用者開著的登入視窗或平常用的 Chrome。回傳結束的數量。"""
+    if sys.platform != "win32":
+        return 0
+    env = dict(os.environ, AIU_PROFILE=str(profile))     # 用環境變數傳路徑，路徑有 ' 也不會壞
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", _ORPHAN_PS], env=env,
+                           capture_output=True, text=True, timeout=30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return int((r.stdout or "0").strip().splitlines()[-1])
+    except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+        return 0
+
+
 def _wait_port(profile: Path, proc: subprocess.Popen, timeout: float) -> int:
     f = profile / "DevToolsActivePort"
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         if proc.poll() is not None:
-            raise CdpError("Chrome 啟動後立即結束（設定檔可能正被另一個 Chrome 視窗使用）")
+            raise ProfileBusy("Chrome 啟動後立即結束：Gemini 專用設定檔正被另一個 Chrome 使用"
+                              "（Gemini 登入視窗還開著的話請先關閉）")
         try:
             port = int(f.read_text(encoding="utf-8").splitlines()[0])
             _http_json(port, "/json/version", timeout=2)
@@ -91,7 +121,23 @@ def read_page_text(
     ready: Callable[[str], bool], wait_seconds: float = 20, startup_timeout: float = 30,
     extra_args: Optional[list[str]] = None,
 ) -> tuple[str, str]:
-    """開啟 url，輪詢頁面文字直到 ready(text) 為真或逾時。回傳 (文字, 最終網址)。失敗丟 CdpError。"""
+    """開啟 url，輪詢頁面文字直到 ready(text) 為真或逾時。回傳 (文字, 最終網址)。失敗丟 CdpError。
+    設定檔被先前殘留的背景 Chrome 佔住時，清掉它再試一次。"""
+    kw = dict(ready=ready, wait_seconds=wait_seconds, startup_timeout=startup_timeout, extra_args=extra_args)
+    try:
+        return _read_once(chrome, profile, url, **kw)
+    except ProfileBusy:
+        if kill_orphan_headless(profile) == 0:
+            raise
+        time.sleep(1.5)
+        return _read_once(chrome, profile, url, **kw)
+
+
+def _read_once(
+    chrome: Path, profile: Path, url: str, *,
+    ready: Callable[[str], bool], wait_seconds: float, startup_timeout: float,
+    extra_args: Optional[list[str]],
+) -> tuple[str, str]:
     profile.mkdir(parents=True, exist_ok=True)
     try:
         (profile / "DevToolsActivePort").unlink()
