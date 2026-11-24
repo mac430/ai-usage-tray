@@ -50,6 +50,10 @@ def launch_login_window(profile: Optional[Path] = None) -> subprocess.Popen:
     profile = profile or GEMINI_PROFILE_DIR
     profile.mkdir(parents=True, exist_ok=True)
     chrome = find_chrome()
+    # 背景讀取卡住時（例如被 Google 要求驗證）會有 headless Chrome 佔著設定檔，
+    # 這時新視窗會被交給它而不顯示，所以先清掉（只動 --headless 的，不會關到使用者的視窗）。
+    from .cdp import kill_orphan_headless
+    kill_orphan_headless(profile)
     return subprocess.Popen([
         str(chrome), f"--user-data-dir={profile}", "--no-first-run",
         "--no-default-browser-check", "--disable-sync", USAGE_URL,
