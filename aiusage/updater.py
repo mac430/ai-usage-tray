@@ -168,7 +168,7 @@ HELPER_PS1 = r"""
 param([string]$Src, [string]$Dst, [string]$Log)
 $ErrorActionPreference = 'Continue'
 $DstP = $Dst.TrimEnd('\') + '\'
-"start $(Get-Date)" | Out-File $Log -Encoding utf8
+"helper-start $(Get-Date)" | Out-File $Log -Append -Encoding utf8
 $deadline = (Get-Date).AddSeconds(30)
 do {
   $left = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($DstP, [StringComparison]::OrdinalIgnoreCase) -and $_.Name -like 'AIUsageTray*' }
@@ -185,15 +185,43 @@ Start-Process (Join-Path $Dst 'AIUsageTray.exe') -ArgumentList 'autostart'
 
 
 def start_install(new_dir: Path, work: Path) -> None:
-    """啟動外部小程式換檔；呼叫端接著要請所有圖示結束、自己也結束。"""
+    """啟動外部小程式換檔；呼叫端接著要請所有圖示結束、自己也結束。
+
+    小程式沒有真的跑起來就丟出錯誤（不然圖示會被關掉卻沒有人換檔、也沒有人重開）。
+    """
     script = work / "apply-update.ps1"
     script.write_text(HELPER_PS1, encoding="utf-8-sig")
     log = BASE_DIR / "update.log"
-    flags = 0x00000008 | 0x08000000 if sys.platform == "win32" else 0   # DETACHED_PROCESS | CREATE_NO_WINDOW
-    subprocess.Popen(
+    try:
+        BASE_DIR.mkdir(parents=True, exist_ok=True)
+        log.write_text(f"launch {time.strftime('%Y-%m-%d %H:%M:%S')}\n", encoding="utf-8")
+    except OSError:
+        pass
+    # 只用 CREATE_NO_WINDOW（不要和 DETACHED_PROCESS 一起用），並把標準輸入輸出接到 NUL，
+    # 否則無主控台的程式啟動 PowerShell 時可能一開就結束。CREATE_NEW_PROCESS_GROUP 讓它不隨本程式結束。
+    flags = 0x08000000 | 0x00000200 if sys.platform == "win32" else 0
+    proc = subprocess.Popen(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
          "-File", str(script), "-Src", str(new_dir), "-Dst", str(install_dir()), "-Log", str(log)],
-        creationflags=flags, close_fds=True)
+        creationflags=flags, close_fds=True,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        try:
+            if "helper-start" in log.read_text(encoding="utf-8", errors="ignore"):
+                return
+        except OSError:
+            pass
+        if proc.poll() is not None:
+            time.sleep(0.5)
+            try:
+                if "helper-start" in log.read_text(encoding="utf-8", errors="ignore"):
+                    return
+            except OSError:
+                pass
+            raise RuntimeError(f"換檔小程式啟動後立刻結束（代碼 {proc.returncode}），請改到 GitHub 手動下載")
+        time.sleep(0.3)
+    raise RuntimeError("換檔小程式 10 秒內沒有啟動，請改到 GitHub 手動下載")
 
 
 def prepare_and_install(rel: Release, progress: Callable[[str], None] = lambda _m: None) -> None:
