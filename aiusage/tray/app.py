@@ -44,8 +44,11 @@ class TrayApp:
         self, key: str, name: str,
         fetch: Callable[[], ProviderStatus],
         open_settings: Optional[Callable[[], object]] = None,
+        name_fn: Optional[Callable[[dict], str]] = None,
     ) -> None:
         self.key, self.name = key, name
+        self._name_fn = name_fn           # 名稱跟著設定變（例如 Gemini 帳號改名）
+        self._part_alerts: dict[str, AlertTracker] = {}
         self._fetch = fetch
         self._open_settings = open_settings
 
@@ -68,6 +71,8 @@ class TrayApp:
         self.show_used = s["show_used"]
         self.notify_on = s["notify"]
         self.base_interval = s["interval_minutes"] * 60
+        if self._name_fn is not None:
+            self.name = self._name_fn(s)
 
     def _watch_loop(self) -> None:
         """設定檔變了就重新讀；有人請求更新／結束就照做。"""
@@ -86,12 +91,17 @@ class TrayApp:
                         log.info("disabled in settings, quitting")
                         self.on_quit_self()
                         return
-                    old_interval, old_th = self.base_interval, cfg.thresholds(self.settings)
+                    old = self.settings
+                    old_th = cfg.thresholds(old)
                     self._apply_settings(s)
                     if cfg.thresholds(s) != old_th:
                         self._alerts = AlertTracker(self.name, cfg.thresholds(s))
-                    if self.base_interval != old_interval:
-                        self.on_refresh_self()
+                        self._part_alerts = {}
+                    accounts_changed = (s["gemini_accounts"] != old["gemini_accounts"]
+                                        or s["gemini_display"] != old["gemini_display"])
+                    if s["interval_minutes"] != old["interval_minutes"] or (
+                            self.key.startswith("gemini") and accounts_changed):
+                        self.on_refresh_self()      # 間隔、帳號或顯示方式變了：重新讀一次
                     self._render()
                 if cfg.request_time("quit") > self._started:
                     self.on_quit_self()
@@ -116,6 +126,27 @@ class TrayApp:
             updater.save_state(notified=rel.version)
             self._notify("AI 用量有新版本", f"v{rel.version} 已推出，右鍵圖示選「有新版本」即可更新")
         self._render()
+
+    def _paused(self) -> bool:
+        """登入中暫停讀取。合併顯示的 Gemini 圖示會讀所有帳號，任何一個在登入就先不讀。"""
+        if setup_checks.is_paused(self.key):
+            return True
+        if self.key == "gemini":
+            from ..accounts import icon_key
+            return any(setup_checks.is_paused(icon_key(a["id"])) for a in self.settings["gemini_accounts"])
+        return False
+
+    def _alert_events(self, st: ProviderStatus) -> list[tuple[str, str]]:
+        """合併顯示多個帳號時，每個帳號各自計算通知。"""
+        if not st.parts:
+            return self._alerts.update(st)
+        out: list[tuple[str, str]] = []
+        for pname, p in st.parts:
+            t = self._part_alerts.get(pname)
+            if t is None:
+                t = self._part_alerts[pname] = AlertTracker(f"{self.name}（{pname}）", self._alerts.thresholds)
+            out += t.update(p)
+        return out
 
     # ── 畫面更新 ────────────────────────────────────────────
     def _render(self) -> None:
@@ -163,13 +194,13 @@ class TrayApp:
                 self._last_ok = st
         self._interval = next_interval(st.status, self.base_interval, self._interval)
         self._render()
-        for title, msg in self._alerts.update(st):
+        for title, msg in self._alert_events(st):
             if self.notify_on:
                 self._notify(title, msg)
 
     def _poll_loop(self) -> None:
         while not self._stop.is_set():
-            if not setup_checks.is_paused(self.key):
+            if not self._paused():
                 try:
                     self._poll_once()
                 except Exception:

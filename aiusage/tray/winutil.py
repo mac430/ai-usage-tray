@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from typing import Optional
 import sys
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -59,11 +60,45 @@ def self_command(args: list[str]) -> list[str]:
 ICON_EXE = {"gemini": "AIUsageTray-Gemini.exe", "codex": "AIUsageTray-Codex.exe"}
 
 
+def icon_exe_name(key: str) -> str:
+    """gemini-a2 → AIUsageTray-Gemini-a2.exe（其他 Gemini 帳號的 exe 在需要時才從主程式複製）。"""
+    if key in ICON_EXE:
+        return ICON_EXE[key]
+    return "AIUsageTray-" + "-".join(p if i else p.capitalize() for i, p in enumerate(key.split("-"))) + ".exe"
+
+
+def ensure_icon_exe(folder: str, key: str) -> Optional[str]:
+    """確保專屬 exe 存在而且跟主程式一樣（更新後舊的複本會被換掉）；做不到就回傳 None。"""
+    import shutil
+    main = os.path.join(folder, "AIUsageTray.exe")
+    exe = os.path.join(folder, icon_exe_name(key))
+    if key in ICON_EXE:                     # 打包時就附上的兩個，不自己複製
+        return exe if os.path.isfile(exe) else None
+    try:
+        ms = os.stat(main)
+        if os.path.isfile(exe):
+            es = os.stat(exe)
+            if es.st_size == ms.st_size and int(es.st_mtime) == int(ms.st_mtime):
+                return exe
+        shutil.copy2(main, exe)
+        return exe
+    except OSError:
+        return exe if os.path.isfile(exe) else None
+
+
+def remove_icon_exe(key: str) -> None:
+    if frozen() and key not in ICON_EXE:
+        try:
+            os.remove(os.path.join(os.path.dirname(sys.executable), icon_exe_name(key)))
+        except OSError:
+            pass
+
+
 def icon_command(key: str, args: list[str]) -> list[str]:
     """啟動某個圖示的指令列：打包版優先用該圖示專屬的 exe（找不到就退回主程式）。"""
-    if frozen() and key in ICON_EXE:
-        exe = os.path.join(os.path.dirname(sys.executable), ICON_EXE[key])
-        if os.path.isfile(exe):
+    if frozen():
+        exe = ensure_icon_exe(os.path.dirname(sys.executable), key)
+        if exe:
             return [exe] + args
     return self_command(args)
 

@@ -13,7 +13,7 @@ from typing import Optional
 
 from .paths import BASE_DIR
 
-PROVIDER_KEYS = ("gemini", "codex")
+PROVIDER_KEYS = ("gemini", "codex")    # 「顯示」分頁的開關；Gemini 多帳號見 accounts.py
 PROVIDER_NAMES = {"gemini": "Gemini", "codex": "Codex"}
 INTERVAL_CHOICES = (5, 10, 15, 30)   # 分鐘
 
@@ -26,6 +26,8 @@ DEFAULTS: dict = {
     "alert_crit": 5,          # 剩餘 ≤ 這個 % 時再通知一次
     "interval_minutes": 10,
     "auto_update_check": True,   # 每天檢查一次有沒有新版本
+    "gemini_accounts": [{"id": "default", "name": "Gemini"}],
+    "gemini_display": "separate",  # separate：每個帳號一個圖示；combined：合併成一個
 }
 
 
@@ -55,6 +57,10 @@ def normalize(raw: dict) -> dict:
     s["alert_crit"] = _clamp_int(raw.get("alert_crit"), 0, 98, DEFAULTS["alert_crit"])
     if s["alert_crit"] >= s["alert_warn"]:
         s["alert_crit"] = max(0, s["alert_warn"] - 1)
+    from .accounts import DISPLAY_MODES, normalize_accounts
+    s["gemini_accounts"] = normalize_accounts(raw.get("gemini_accounts"))
+    if raw.get("gemini_display") in DISPLAY_MODES:
+        s["gemini_display"] = raw["gemini_display"]
     m = _clamp_int(raw.get("interval_minutes"), 1, 60, DEFAULTS["interval_minutes"])
     s["interval_minutes"] = m if m in INTERVAL_CHOICES else DEFAULTS["interval_minutes"]
     return s
@@ -104,7 +110,23 @@ def update(path: Optional[Path] = None, **changes) -> dict:
 
 
 def enabled(s: dict, key: str) -> bool:
+    """這個圖示現在該不該存在。gemini-<id> 只在「每個帳號一個圖示」且該帳號還在時存在。"""
+    from .accounts import DEFAULT_ID, account_id_of, find
+    aid = account_id_of(key)
+    if aid is not None:
+        if not s.get("show_gemini", True):
+            return False
+        if aid == DEFAULT_ID:
+            return True
+        return s.get("gemini_display") == "separate" and find(s["gemini_accounts"], aid) is not None
     return bool(s.get(f"show_{key}", True))
+
+
+def icon_keys(s: dict) -> list[str]:
+    """設定下應該存在的所有圖示代號。"""
+    from .accounts import icon_key
+    keys = [icon_key(a["id"]) for a in s["gemini_accounts"]] + ["codex"]
+    return [k for k in keys if enabled(s, k)]
 
 
 def thresholds(s: dict) -> tuple[float, float]:

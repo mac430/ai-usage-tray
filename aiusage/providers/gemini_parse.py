@@ -144,7 +144,8 @@ def parse_usage_text(text: str, now: datetime, final_url: str = "") -> ProviderS
                               fetched_at=now, **kw)
 
     if final_url and "gemini.google.com/usage" not in final_url:
-        return status("login_required", f"被導向別的網址（{final_url.split('?')[0]}），請重新登入")
+        return status("login_required", f"被導向別的網址（{final_url.split('?')[0]}）：尚未登入，"
+                      "或登入的是學校／公司帳號（這類帳號沒有用量頁）")
 
     s_idx, s_lab = _find_label(text, SESSION_LABELS)
     w_idx, w_lab = _find_label(text, WEEKLY_LABELS)

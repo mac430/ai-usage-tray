@@ -11,13 +11,14 @@ import shutil
 import sys
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 
 from . import __version__
 from . import settings as cfg
 from . import setup_checks as sc
+from . import accounts as acc
 from . import updater
-from .paths import BASE_DIR, GEMINI_PROFILE_DIR
+from .paths import BASE_DIR
 from .tray import winutil
 
 WINDOW_TITLE = "AI 用量 設定"
@@ -33,6 +34,7 @@ class SettingsWindow(tk.Tk):
         self.first_run = first_run
         self._q: "queue.Queue[tuple]" = queue.Queue()
         self._login_proc = None
+        self._gemini_status: dict[str, str] = {}     # 帳號 id → 最近一次檢查結果
         self._loading = True
         self.s = cfg.load()
         if first_run:
@@ -46,8 +48,7 @@ class SettingsWindow(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(300, self.check_codex)
         self.after(300, self.check_claude)
-        self.gemini_var.set("● 已有登入資料，按「檢查登入」確認目前狀態。" if sc.gemini_profile_exists()
-                            else "● 尚未登入：按「開啟登入視窗」開始。")
+        self._show_gemini_status()
 
     # ── 畫面 ───────────────────────────────────────────────
     def _build(self) -> None:
@@ -69,12 +70,24 @@ class SettingsWindow(tk.Tk):
         ttk.Button(bottom, text="關閉", command=self._on_close).pack(side="right")
 
     def _tab_accounts(self, f: ttk.Frame) -> None:
-        g = ttk.LabelFrame(f, text=" Gemini（專用 Chrome 設定檔，請登入有 Gemini 方案的 Google 帳號） ")
+        g = ttk.LabelFrame(f, text=" Gemini（每個帳號一個專用 Chrome 設定檔） ")
         g.pack(fill="x", **PAD)
+        ttk.Label(g, foreground="#b45309", wraplength=WRAP, justify="left", text=(
+            "⚠ 學校、公司（Google Workspace）帳號沒有 Gemini 用量頁，無法顯示。"
+            "請登入有 Gemini 方案（例如 Plus）的個人 Google 帳號。")).pack(anchor="w", padx=10, pady=(6, 2))
+        row = ttk.Frame(g); row.pack(fill="x", padx=10, pady=4)
+        ttk.Label(row, text="帳號：").pack(side="left")
+        self.var_gacc = tk.StringVar()
+        self.cb_gacc = ttk.Combobox(row, width=18, state="readonly", textvariable=self.var_gacc)
+        self.cb_gacc.pack(side="left")
+        self.cb_gacc.bind("<<ComboboxSelected>>", lambda _e: self._show_gemini_status())
+        ttk.Button(row, text="新增帳號", command=self.gemini_add).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="改名", command=self.gemini_rename).pack(side="left", padx=4)
+        self.btn_gremove = ttk.Button(row, text="移除", command=self.gemini_remove)
+        self.btn_gremove.pack(side="left")
         ttk.Label(g, justify="left", wraplength=WRAP, text=(
-            "1. 按「開啟登入視窗」，在跳出的 Chrome 登入 Google（問要不要登入 Chrome 時選不要）。\n"
-            "2. 教育或公司帳號沒有用量頁，請用自己有 Plus 的帳號。\n"
-            "3. 看到「用量限制」頁面後關閉那個視窗，回來按「檢查登入」。")).pack(anchor="w", padx=10, pady=4)
+            "1. 選好帳號，按「開啟登入視窗」，在跳出的 Chrome 登入 Google（問要不要登入 Chrome 時選不要）。\n"
+            "2. 看到「用量限制」頁面後關閉那個視窗，回來按「檢查登入」。")).pack(anchor="w", padx=10, pady=4)
         row = ttk.Frame(g); row.pack(fill="x", padx=10, pady=4)
         ttk.Button(row, text="開啟登入視窗", command=self.open_gemini_login).pack(side="left")
         self.btn_gcheck = ttk.Button(row, text="檢查登入", command=self.check_gemini)
@@ -82,6 +95,7 @@ class SettingsWindow(tk.Tk):
         ttk.Button(row, text="登出", command=self.gemini_logout).pack(side="left")
         self.gemini_var = tk.StringVar(value="● 尚未檢查")
         ttk.Label(g, textvariable=self.gemini_var, wraplength=WRAP, justify="left").pack(anchor="w", padx=10, pady=(0, 8))
+        self._refresh_gemini_accounts()
 
         c = ttk.LabelFrame(f, text=" Codex（ChatGPT 帳號） ")
         c.pack(fill="x", **PAD)
@@ -115,6 +129,15 @@ class SettingsWindow(tk.Tk):
         ttk.Label(box, foreground="#666", wraplength=WRAP, justify="left", text=(
             "沒登入的平台會自動隱藏，登入後才出現。\n"
             "每個圖示可以各自拖到工作列或收進 ^ 裡。")).pack(anchor="w", padx=10, pady=(2, 8))
+
+        box = ttk.LabelFrame(f, text=" Gemini 有多個帳號時 ")
+        box.pack(fill="x", **PAD)
+        self.var_gdisp = tk.StringVar(value=self.s["gemini_display"])
+        self.var_gdisp.trace_add("write", lambda *_a: self._on_gemini_display())
+        ttk.Radiobutton(box, text="每個帳號一個圖示（滑鼠移上去會顯示帳號名稱）", value="separate",
+                        variable=self.var_gdisp).pack(anchor="w", padx=10, pady=3)
+        ttk.Radiobutton(box, text="合併成一個圖示（數字顯示最緊的帳號，滑鼠移上去列出全部）", value="combined",
+                        variable=self.var_gdisp).pack(anchor="w", padx=10, pady=(3, 8))
 
         box = ttk.LabelFrame(f, text=" 圖示上的數字 ")
         box.pack(fill="x", **PAD)
@@ -195,9 +218,20 @@ class SettingsWindow(tk.Tk):
         on = self.var_show[key].get()
         self._save(**{f"show_{key}": on})
         if on:
-            from .launcher import spawn
-            spawn(key)
+            self._spawn_missing()
         # 關掉：圖示自己看到設定後會結束
+
+    def _spawn_missing(self) -> None:
+        """把設定下應該存在的圖示都開起來（已經在跑的會因單一實例鎖自動結束，不會重複）。"""
+        from .launcher import spawn
+        for k in cfg.icon_keys(self.s):
+            spawn(k)
+
+    def _on_gemini_display(self) -> None:
+        if self._loading:
+            return
+        self._save(gemini_display=self.var_gdisp.get())
+        self._spawn_missing()          # 切到「每個帳號一個」要把其他帳號的圖示開起來；切到合併的會自己結束
 
     def _save_thresholds(self) -> None:
         try:
@@ -291,55 +325,135 @@ class SettingsWindow(tk.Tk):
         self.codex_var.set(f"● 已複製：{text}")
 
     # ── Gemini ─────────────────────────────────────────────
+    def _accounts(self) -> list[dict]:
+        return self.s["gemini_accounts"]
+
+    def _refresh_gemini_accounts(self, select_id: str | None = None) -> None:
+        accs = self._accounts()
+        self.cb_gacc["values"] = [a["name"] for a in accs]
+        cur = select_id or self._sel_id()
+        idx = next((i for i, a in enumerate(accs) if a["id"] == cur), 0)
+        self.cb_gacc.current(idx)
+        self._show_gemini_status()
+
+    def _sel(self) -> dict:
+        accs = self._accounts()
+        i = self.cb_gacc.current() if hasattr(self, "cb_gacc") else 0
+        return accs[i] if 0 <= i < len(accs) else accs[0]
+
+    def _sel_id(self) -> str:
+        return self._sel()["id"] if hasattr(self, "cb_gacc") and self.cb_gacc.current() >= 0 else acc.DEFAULT_ID
+
+    def _show_gemini_status(self) -> None:
+        a = self._sel()
+        self.btn_gremove.state(["disabled"] if a["id"] == acc.DEFAULT_ID else ["!disabled"])
+        if a["id"] in self._gemini_status:
+            self.gemini_var.set(self._gemini_status[a["id"]])
+        elif acc.profile_dir(a["id"]).is_dir():
+            self.gemini_var.set("● 已有登入資料，按「檢查登入」確認目前狀態。")
+        else:
+            self.gemini_var.set("● 尚未登入：按「開啟登入視窗」開始。")
+
+    def _set_gstatus(self, aid: str, text: str) -> None:
+        self._gemini_status[aid] = text
+        if self._sel_id() == aid:
+            self.gemini_var.set(text)
+
+    def gemini_add(self) -> None:
+        accs = self._accounts()
+        if len(accs) >= acc.MAX_ACCOUNTS:
+            messagebox.showinfo(WINDOW_TITLE, f"最多 {acc.MAX_ACCOUNTS} 個帳號。")
+            return
+        name = simpledialog.askstring(WINDOW_TITLE, "新帳號的名稱（例如：工作、副帳號）：", parent=self)
+        if not name or not name.strip():
+            return
+        aid = acc.new_id(accs)
+        self._save(gemini_accounts=accs + [{"id": aid, "name": name.strip()[:acc.MAX_NAME]}])
+        self._refresh_gemini_accounts(aid)
+        self._spawn_missing()
+        self._set_gstatus(aid, "● 已新增。按「開啟登入視窗」登入這個帳號。")
+
+    def gemini_rename(self) -> None:
+        a = self._sel()
+        name = simpledialog.askstring(WINDOW_TITLE, "新的名稱：", initialvalue=a["name"], parent=self)
+        if not name or not name.strip():
+            return
+        accs = [dict(x, name=name.strip()[:acc.MAX_NAME]) if x["id"] == a["id"] else x for x in self._accounts()]
+        self._save(gemini_accounts=accs)
+        self._refresh_gemini_accounts(a["id"])
+
+    def gemini_remove(self) -> None:
+        a = self._sel()
+        if a["id"] == acc.DEFAULT_ID:
+            return
+        if not messagebox.askyesno(WINDOW_TITLE, f"要移除「{a['name']}」嗎？\n會刪除這個帳號的專用 Chrome 設定檔（登入資料）。"):
+            return
+        self._save(gemini_accounts=[x for x in self._accounts() if x["id"] != a["id"]])
+        self._refresh_gemini_accounts(acc.DEFAULT_ID)
+        key = acc.icon_key(a["id"])
+
+        def cleanup():                    # 等那個帳號的圖示自己結束後再刪檔
+            sc.set_pause(key, True)
+            shutil.rmtree(acc.profile_dir(a["id"]), ignore_errors=True)
+            sc.set_pause(key, False)
+            winutil.remove_icon_exe(key)
+        self.after(4000, cleanup)
+
     def open_gemini_login(self) -> None:
         from .providers.gemini import launch_login_window
+        a = self._sel()
+        key = acc.icon_key(a["id"])
         try:
-            sc.set_pause("gemini", True)
-            self._login_proc = launch_login_window()
-            self.gemini_var.set("● 登入視窗已開啟。登入完成並關閉該視窗後，按「檢查登入」。")
+            sc.set_pause(key, True)
+            self._login_proc = launch_login_window(acc.profile_dir(a["id"]))
+            self._set_gstatus(a["id"], f"● 「{a['name']}」的登入視窗已開啟。登入完成並關閉該視窗後，按「檢查登入」。")
         except Exception as e:  # noqa: BLE001
-            sc.set_pause("gemini", False)
-            self.gemini_var.set(f"✖ 無法開啟 Chrome：{e}")
+            sc.set_pause(key, False)
+            self._set_gstatus(a["id"], f"✖ 無法開啟 Chrome：{e}")
 
     def check_gemini(self) -> None:
+        a = self._sel()
+        aid, key, profile = a["id"], acc.icon_key(a["id"]), acc.profile_dir(a["id"])
         if self._login_proc is not None and self._login_proc.poll() is None:
-            self.gemini_var.set("● 請先關閉剛才開啟的 Chrome 登入視窗，再按「檢查登入」。")
+            self._set_gstatus(aid, "● 請先關閉剛才開啟的 Chrome 登入視窗，再按「檢查登入」。")
             return
-        if not sc.gemini_profile_exists():
-            self.gemini_var.set("● 尚未登入：按「開啟登入視窗」開始。")
+        if not profile.is_dir():
+            self._set_gstatus(aid, "● 尚未登入：按「開啟登入視窗」開始。")
             return
         self.btn_gcheck.state(["disabled"])
-        self.gemini_var.set("● 檢查中…（約 10~20 秒）")
-        sc.set_pause("gemini", True)          # 檢查時托盤先別讀，避免兩個 Chrome 搶同一個設定檔
+        self._set_gstatus(aid, "● 檢查中…（約 10~20 秒）")
+        sc.set_pause(key, True)              # 檢查時托盤先別讀，避免兩個 Chrome 搶同一個設定檔
 
         def work():
             from .providers.gemini import fetch
-            return fetch()
+            return fetch(profile)
 
         def done(res) -> None:
             ok, text = sc.describe(res) if not isinstance(res, Exception) else (False, f"檢查失敗：{res}")
-            sc.set_pause("gemini", False)
+            sc.set_pause(key, False)
             if ok:
-                cfg.request("refresh")      # 讓隱藏中的 Gemini 圖示馬上更新、出現
-            self._ui(lambda: (self.gemini_var.set(("✔ " if ok else "✖ ") + text),
+                cfg.request("refresh")      # 讓隱藏中的圖示馬上更新、出現
+            self._ui(lambda: (self._set_gstatus(aid, ("✔ " if ok else "✖ ") + text),
                               self.btn_gcheck.state(["!disabled"])))
 
         sc.run_in_thread(work, done)
 
     def gemini_logout(self) -> None:
-        if not sc.gemini_profile_exists():
-            self.gemini_var.set("● 目前沒有登入。")
+        a = self._sel()
+        aid, key, profile = a["id"], acc.icon_key(a["id"]), acc.profile_dir(a["id"])
+        if not profile.is_dir():
+            self._set_gstatus(aid, "● 目前沒有登入。")
             return
-        if not messagebox.askyesno(WINDOW_TITLE, "要登出 Gemini 嗎？\n會刪除專用 Chrome 設定檔（不影響你平常用的 Chrome）。"):
+        if not messagebox.askyesno(WINDOW_TITLE, f"要登出「{a['name']}」嗎？\n會刪除這個帳號的專用 Chrome 設定檔（不影響你平常用的 Chrome）。"):
             return
-        sc.set_pause("gemini", True)
+        sc.set_pause(key, True)
         time.sleep(1.5)                       # 等背景讀取用的 Chrome 結束
-        shutil.rmtree(GEMINI_PROFILE_DIR, ignore_errors=True)
-        sc.set_pause("gemini", False)
-        if sc.gemini_profile_exists():
-            self.gemini_var.set("✖ 有檔案正在使用中，沒刪乾淨。請關閉相關的 Chrome 視窗後再按一次「登出」。")
+        shutil.rmtree(profile, ignore_errors=True)
+        sc.set_pause(key, False)
+        if profile.is_dir():
+            self._set_gstatus(aid, "✖ 有檔案正在使用中，沒刪乾淨。請關閉相關的 Chrome 視窗後再按一次「登出」。")
         else:
-            self.gemini_var.set("✔ 已登出。Gemini 圖示會自動隱藏。")
+            self._set_gstatus(aid, "✔ 已登出。這個帳號的圖示會自動隱藏。")
         cfg.request("refresh")
 
     # ── Codex / Claude ─────────────────────────────────────
@@ -367,7 +481,8 @@ class SettingsWindow(tk.Tk):
     # ── 結束 ───────────────────────────────────────────────
     def _on_close(self) -> None:
         self._save_thresholds()
-        sc.set_pause("gemini", False)
+        for a in self._accounts():
+            sc.set_pause(acc.icon_key(a["id"]), False)
         self.destroy()
 
 

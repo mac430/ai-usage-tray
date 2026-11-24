@@ -25,7 +25,7 @@ def spawn(key: str) -> subprocess.Popen:
 
 def start_enabled_icons(s: dict | None = None) -> list[str]:
     s = s or cfg.load()
-    keys = [k for k in cfg.PROVIDER_KEYS if cfg.enabled(s, k)]
+    keys = cfg.icon_keys(s)
     for key in keys:
         spawn(key)
     return keys

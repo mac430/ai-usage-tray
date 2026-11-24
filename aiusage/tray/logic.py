@@ -46,6 +46,8 @@ def fmt_pct(w: UsageWindow, show_used: bool) -> str:
 
 def tooltip(name: str, st: ProviderStatus, stale: bool = False, show_used: bool = True) -> str:
     """Windows 托盤提示最多約 127 字元，這裡刻意精簡。"""
+    if st.parts:
+        return _combined_tooltip(name, st, stale, show_used)
     head = f"{name} {st.plan.title()}".strip()
     if st.status != "ok" and not st.windows:
         return f"{head}：{_status_text(st)}"[:127]
@@ -60,6 +62,24 @@ def tooltip(name: str, st: ProviderStatus, stale: bool = False, show_used: bool 
     return "\n".join(parts)[:127]
 
 
+def _short_pct(w: UsageWindow, show_used: bool) -> str:
+    return f"{(w.used_percent if show_used else w.remaining_percent):g}%"
+
+
+def _combined_tooltip(name: str, st: ProviderStatus, stale: bool, show_used: bool) -> str:
+    """合併顯示：每個帳號一行「名稱 目前／每週」。提示最多 127 字，所以寫得很短。"""
+    lines = [f"{name}（{'已使用' if show_used else '剩餘'}：目前／每週）"]
+    for pname, p in st.parts:
+        s, w = p.window("session"), p.window("weekly")
+        if p.status == "ok" and (s or w):
+            lines.append(f"{pname} {_short_pct(s, show_used) if s else '-'}／{_short_pct(w, show_used) if w else '-'}")
+        else:
+            lines.append(f"{pname} {'未登入' if p.status == 'login_required' else '讀取失敗'}")
+    if stale:
+        lines.append("資料可能過期")
+    return "\n".join(lines)[:127]
+
+
 def _status_text(st: ProviderStatus) -> str:
     return {
         "login_required": "需要重新登入",
@@ -71,6 +91,16 @@ def _status_text(st: ProviderStatus) -> str:
 def menu_lines(st: ProviderStatus, now: Optional[datetime] = None, show_used: bool = True) -> list[str]:
     """右鍵選單上方的（不可點）資訊列。"""
     lines: list[str] = []
+    if st.parts:
+        for pname, p in st.parts:
+            if not p.windows:
+                lines.append(f"{pname}：{_status_text(p)}")
+            for w in p.windows:
+                lines.append(f"{pname}｜{w.label}：已用 {w.used_percent:g}%（剩 {fmt_remaining(w)}），"
+                             f"{fmt_reset(w, now)} 重設")
+        if st.fetched_at:
+            lines.append(f"更新於 {st.fetched_at.strftime('%H:%M:%S')}")
+        return lines
     for w in st.windows:
         lines.append(f"{w.label}：已用 {w.used_percent:g}%（剩 {fmt_remaining(w)}），{fmt_reset(w, now)} 重設")
     if st.status != "ok":

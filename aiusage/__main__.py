@@ -5,7 +5,7 @@
   python -m aiusage gemini parse-file 檔案  離線解析一份已存的頁面文字（不連網）
   python -m aiusage settings                打開設定頁（並啟動勾選的圖示）；wizard 是舊名稱
   python -m aiusage tray all                只啟動勾選的托盤圖示（開機自動啟動用）
-  python -m aiusage tray gemini             啟動 Gemini 托盤圖示
+  python -m aiusage tray gemini             啟動 Gemini 托盤圖示（gemini-<id> 是其他帳號）
   python -m aiusage codex once              讀取一次 Codex 用量（印出整理後的結果與原始回應）
   python -m aiusage tray codex              啟動 Codex 托盤圖示
 """
@@ -33,11 +33,16 @@ def main(argv: list[str]) -> int:
     if len(argv) == 1 and argv[0] in ("settings", "wizard"):
         from .launcher import launch_settings
         return launch_settings()
-    if len(argv) == 2 and argv[0] == "tray" and argv[1] == "gemini":
+    if len(argv) == 2 and argv[0] == "tray" and argv[1].startswith("gemini"):
+        from .accounts import account_id_of
+        if account_id_of(argv[1]) is None:
+            print(__doc__)
+            return 2
         from .launcher import spawn
-        from .providers.gemini import fetch
+        from .providers.gemini import tray_functions
         from .tray.app import TrayApp
-        return TrayApp("gemini", "Gemini", fetch, lambda: spawn("settings")).run()
+        fetch, name_fn = tray_functions(argv[1])
+        return TrayApp(argv[1], "Gemini", fetch, lambda: spawn("settings"), name_fn=name_fn).run()
     if len(argv) == 2 and argv[0] == "tray" and argv[1] == "codex":
         from .launcher import spawn
         from .providers.codex import fetch

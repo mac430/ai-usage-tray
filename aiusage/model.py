@@ -34,6 +34,8 @@ class ProviderStatus:
     plan: str = ""
     windows: list[UsageWindow] = field(default_factory=list)
     fetched_at: Optional[datetime] = None
+    # 合併顯示多個帳號時：[(帳號名稱, 該帳號的 ProviderStatus), ...]；windows 放最緊那個帳號的資料
+    parts: list = field(default_factory=list)
 
     def window(self, key: str) -> Optional[UsageWindow]:
         return next((w for w in self.windows if w.key == key), None)
